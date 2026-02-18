@@ -49,39 +49,30 @@ jobs:
                   
                   # Reformat for Git: YYYY-MM-DD HH:MM:SS
                   LAST_RELEASE_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
+                  echo "Last release timestamp detected: $LAST_RELEASE_TS"
               else
                   echo "Output folder exists but no SQL bundle found."
               fi
           else
               echo "Output folder does not exist yet."
           fi
-
-          # 3. Determine Diff Range
-          if [ -z "$LAST_RELEASE_TS" ]; then
-              echo "Result: Processing all history."
-              # Use the very first commit hash
-              START_POINT=$(git rev-list --max-parents=0 HEAD)
-              DIFF_RANGE="$START_POINT..HEAD"
-          else
-              echo "Result: Processing changes since $LAST_RELEASE_TS"
-              # Important: use --since to capture everything after that timestamp
-              DIFF_RANGE="$LAST_RELEASE_TS"
-              # DIFF_RANGE="--since=\"$LAST_RELEASE_TS\""
-          fi
-
+          
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
           OUTPUT_FILE="Output/${TIMESTAMP}__ReleaseBundle.sql"
           mkdir -p Output
-          
-          # 3. Identify changed files (Fixed Expansion)
+
+          # 3. Identify changed files (The "If/Else" fix)
           if [ -z "$LAST_RELEASE_TS" ]; then
-              # If first run, use the START_POINT..HEAD syntax
-              FILES=$(git log $DIFF_RANGE --name-only --pretty=format: | sort -u)
-              COMMIT_TITLES=$(git log $DIFF_RANGE --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
+              echo "Result: Processing all history."
+              # Use the range syntax for first run
+              START_POINT=$(git rev-list --max-parents=0 HEAD)
+              FILES=$(git log "$START_POINT..HEAD" --name-only --pretty=format: | sort -u)
+              COMMIT_TITLES=$(git log "$START_POINT..HEAD" --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
           else
-              # If subsequent run, use --since with strict quoting
-              FILES=$(git log --since="$DIFF_RANGE" --name-only --pretty=format: | sort -u)
-              COMMIT_TITLES=$(git log --since="$DIFF_RANGE" --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
+              echo "Result: Processing since $LAST_RELEASE_TS"
+              # Use the --since flag with strict quotes for subsequent runs
+              FILES=$(git log --since="$LAST_RELEASE_TS" --name-only --pretty=format: | sort -u)
+              COMMIT_TITLES=$(git log --since="$LAST_RELEASE_TS" --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
           fi
           
           # 2. Identify changed files
