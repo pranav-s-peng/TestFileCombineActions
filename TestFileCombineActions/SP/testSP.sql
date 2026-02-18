@@ -1,0 +1,9 @@
+GO
+CREATE OR ALTER PROCEDURE [test].[SomeSP]
+(
+	@Param1 INT
+)
+AS
+BEGIN
+	SELECT 0;
+END
