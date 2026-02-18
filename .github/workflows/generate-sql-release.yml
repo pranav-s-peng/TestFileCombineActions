@@ -65,16 +65,28 @@ jobs:
           else
               echo "Result: Processing changes since $LAST_RELEASE_TS"
               # Important: use --since to capture everything after that timestamp
-              DIFF_RANGE="--since=\"$LAST_RELEASE_TS\""
+              DIFF_RANGE="$LAST_RELEASE_TS"
+              # DIFF_RANGE="--since=\"$LAST_RELEASE_TS\""
           fi
 
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
           OUTPUT_FILE="Output/${TIMESTAMP}__ReleaseBundle.sql"
           mkdir -p Output
-
+          
+          # 3. Identify changed files (Fixed Expansion)
+          if [ -z "$LAST_RELEASE_TS" ]; then
+              # If first run, use the START_POINT..HEAD syntax
+              FILES=$(git log $DIFF_RANGE --name-only --pretty=format: | sort -u)
+              COMMIT_TITLES=$(git log $DIFF_RANGE --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
+          else
+              # If subsequent run, use --since with strict quoting
+              FILES=$(git log --since="$DIFF_RANGE" --name-only --pretty=format: | sort -u)
+              COMMIT_TITLES=$(git log --since="$DIFF_RANGE" --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
+          fi
+          
           # 2. Identify changed files
           # Note: We use 'origin/Release' to ensure we see what's on the server
-          FILES=$(git log $DIFF_RANGE --name-only --pretty=format: | sort -u)
+          #FILES=$(git log $DIFF_RANGE --name-only --pretty=format: | sort -u)
 
           # Initialize counters
           SP_COUNT=0
@@ -157,7 +169,7 @@ jobs:
           echo "- Combined SQL file: [${OUTPUT_FILE}](${FILE_URL})" >> $GITHUB_STEP_SUMMARY
           
           # Extract unique commit titles since the last release
-          COMMIT_TITLES=$(git log $DIFF_RANGE --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
+          #COMMIT_TITLES=$(git log $DIFF_RANGE --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
 
           # Append to the summary
           echo "### Change Log (Since Last Release)" >> $GITHUB_STEP_SUMMARY
