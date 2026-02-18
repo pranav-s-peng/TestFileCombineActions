@@ -3,12 +3,13 @@ name: Generate SQL Release Bundle
 on:
   pull_request:
     branches:
-      - release
+      - Release
     types: [closed]
+  workflow_dispatch: # This enables the manual "Run" button
 
 jobs:
   generate-bundle:
-    if: github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -17,31 +18,77 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 
+          fetch-depth: 0 # This fetches all branches and history
 
       - name: Process SQL Changes
         id: process_sql
         shell: bash
         run: |
+          # 1. Handle Git History safely
+          # Only unshallow if the repo actually is shallow
+          if [ -f .git/shallow ]; then
+            git fetch --unshallow --tags
+          else
+            git fetch --all --tags
+          fi
+          
+          LAST_RELEASE_TS=""
+
+          # 2. Check for Output folder without triggering ls immediately
+          if [ -d "Output" ]; then
+              echo "Output directory exists."
+              
+              # Get the newest file by name into a variable safely
+              # 2>/dev/null hides the error if the folder is empty
+              LAST_FILE=$(ls -1 Output/ 2>/dev/null | grep "__" | sort -r | head -n 1 || echo "")
+              
+              if [ -n "$LAST_FILE" ]; then
+                  echo "Found last release: $LAST_FILE"
+                  RAW_TS=$(echo "$LAST_FILE" | cut -d'_' -f1)
+                  
+                  # Reformat for Git: YYYY-MM-DD HH:MM:SS
+                  LAST_RELEASE_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
+              else
+                  echo "Output folder exists but no SQL bundle found."
+              fi
+          else
+              echo "Output folder does not exist yet."
+          fi
+
+          # 3. Determine Diff Range
+          if [ -z "$LAST_RELEASE_TS" ]; then
+              echo "Result: Processing all history."
+              # Use the very first commit hash
+              START_POINT=$(git rev-list --max-parents=0 HEAD)
+              DIFF_RANGE="$START_POINT..HEAD"
+          else
+              echo "Result: Processing changes since $LAST_RELEASE_TS"
+              # Important: use --since to capture everything after that timestamp
+              DIFF_RANGE="--since=\"$LAST_RELEASE_TS\""
+          fi
+
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
           OUTPUT_FILE="Output/${TIMESTAMP}__ReleaseBundle.sql"
           mkdir -p Output
+
+          # 2. Identify changed files
+          # Note: We use 'origin/Release' to ensure we see what's on the server
+          FILES=$(git log $DIFF_RANGE --name-only --pretty=format: | sort -u)
 
           # Initialize counters
           SP_COUNT=0
           DATA_COUNT=0
           ERRORS=0
 
-          # Identify changed files between branches
-          FILES=$(git diff origin/release..origin/main --name-only)
-
-          # Start Job Summary Table
           echo "### SQL Processing Report" >> $GITHUB_STEP_SUMMARY
           echo "| File Type | Status | File Name |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
 
           for FILE in $FILES; do
-              # --- STORED PROCEDURES (SP/ folder) ---
+              # Skip if file doesn't exist (deleted) or isn't in our target folders
+              if [ -z "$FILE" ] || [ ! -f "$FILE" ]; then continue; fi
+              
+              # --- STORED PROCEDURES ---
               if [[ $FILE == *"SP/"* && $FILE == *.sql ]]; then
                   # Clean Windows line endings for reliable regex matching
                   CONTENT=$(cat "$FILE" | tr -d '\r')
@@ -65,8 +112,8 @@ jobs:
 
               # --- DATA SCRIPTS (Data/ folder) ---
               elif [[ $FILE == *"Data/"* && $FILE == *.sql ]]; then
-                  # Capture unified diff, filtering for additions
-                  DIFF_CHANGES=$(git diff origin/release..origin/main --unified=0 "$FILE" | grep '^[+ ]' | grep -v '+++')
+                  # Get just the diffs since that timestamp
+                  DIFF_CHANGES=$(git log $DIFF_RANGE -p --unified=0 "$FILE" | grep '^[+ ]' | grep -v '+++' | grep -v 'diff --git')
                   
                   if [ -n "$DIFF_CHANGES" ]; then
                       {
