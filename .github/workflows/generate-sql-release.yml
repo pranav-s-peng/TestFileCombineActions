@@ -105,13 +105,16 @@ jobs:
                       continue
                   fi
 
-                  # Clean any extra "GO"s just for neatness
-                  CONTENT=$(echo "$CONTENT" | sed 's/[[:space:]]*GO[[:space:]]*$//I')
+                  # Remove GOs from start and end only (Case Insensitive)
+                  # 1. Strip leading GOs and newlines
+                  # 2. Strip trailing GOs and newlines
+                  CONTENT=$(echo "$CONTENT" | sed -E ':a; /^[[:space:]]*GO[[:space:]]*$/I {N; s/^[[:space:]]*GO[[:space:]]*\n//I; ba;}' | sed -E ':a; /[[:space:]]*GO[[:space:]]*$/I {s/[[:space:]]*GO[[:space:]]*$//I; N; ba;}')
                   
                   {
-                      echo -e "-- SP/$(basename "$FILE") (Diff)\nGO\n"
+                      echo "-- SP/$(basename "$FILE")"
+                      echo "GO"
                       echo "$CONTENT"
-                      echo -e "\n"
+                      echo "" # Single newline for separation
                   } >> "$OUTPUT_FILE"
                   
                   SP_COUNT=$((SP_COUNT + 1))
@@ -127,13 +130,17 @@ jobs:
                       RAW_DIFF=$(git log --since="$LAST_RELEASE_TS" -p --unified=0 "$FILE")
                   fi
                   
-                  DIFF_CHANGES=$(echo "$RAW_DIFF" | grep -E '^\+' | grep -Ev '^\+\+\+' | sed 's/^+//g')
+                  DIFF_CHANGES=$(echo "$RAW_DIFF" | grep -E '^\+' | grep -Ev '^\+\+\+' | sed 's/^+//g' | tr -d '\r')
                   
                   if [ -n "$DIFF_CHANGES" ]; then
+                      # Strip leading/trailing GOs from the diff only
+                      DIFF_CHANGES=$(echo "$DIFF_CHANGES" | sed -E ':a; /^[[:space:]]*GO[[:space:]]*$/I {N; s/^[[:space:]]*GO[[:space:]]*\n//I; ba;}' | sed -E ':a; /[[:space:]]*GO[[:space:]]*$/I {s/[[:space:]]*GO[[:space:]]*$//I; N; ba;}')
+                      
                       {
-                          echo -e "-- Data/$(basename "$FILE") (Diff)\nGO\n"
+                          echo "-- Data/$(basename "$FILE") (Diff)"
+                          echo "GO"
                           echo "$DIFF_CHANGES"
-                          echo -e "\n"
+                          echo "" # Single newline for separation
                       } >> "$OUTPUT_FILE"
                       
                       DATA_COUNT=$((DATA_COUNT + 1))
