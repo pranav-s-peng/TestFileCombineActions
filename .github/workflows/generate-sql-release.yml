@@ -1,0 +1,104 @@
+name: Generate SQL Release Bundle
+
+on:
+  pull_request:
+    branches:
+      - release
+    types: [closed]
+
+jobs:
+  generate-bundle:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+
+      - name: Process SQL Changes
+        id: process_sql
+        shell: bash
+        run: |
+          TIMESTAMP=$(date +"%Y%m%d%H%M%S")
+          OUTPUT_FILE="Output/${TIMESTAMP}__ReleaseBundle.sql"
+          mkdir -p Output
+
+          # Initialize counters
+          SP_COUNT=0
+          DATA_COUNT=0
+          ERRORS=0
+
+          # Identify changed files between branches
+          FILES=$(git diff origin/release..origin/main --name-only)
+
+          # Start Job Summary Table
+          echo "### SQL Processing Report" >> $GITHUB_STEP_SUMMARY
+          echo "| File Type | Status | File Name |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+
+          for FILE in $FILES; do
+              # --- STORED PROCEDURES (SP/ folder) ---
+              if [[ $FILE == *"SP/"* && $FILE == *.sql ]]; then
+                  # Clean Windows line endings for reliable regex matching
+                  CONTENT=$(cat "$FILE" | tr -d '\r')
+                  
+                  # Validation for CREATE OR ALTER PROCEDURE
+                  if [[ ! "$CONTENT" =~ (GO)?[[:space:]]*CREATE[[:space:]]+OR[[:space:]]+ALTER[[:space:]]+PROCEDURE ]]; then
+                      echo "| SP | FAILED | $FILE |" >> $GITHUB_STEP_SUMMARY
+                      echo "::error::Validation Failed: $FILE is missing 'CREATE OR ALTER PROCEDURE'."
+                      ERRORS=$((ERRORS + 1))
+                      continue
+                  fi
+
+                  {
+                      echo -e "--------\nGO\n--------\n-- $(basename "$FILE")\n--------"
+                      echo "$CONTENT"
+                      echo -e "\n"
+                  } >> "$OUTPUT_FILE"
+                  
+                  SP_COUNT=$((SP_COUNT + 1))
+                  echo "| SP | Added | $FILE |" >> $GITHUB_STEP_SUMMARY
+
+              # --- DATA SCRIPTS (Data/ folder) ---
+              elif [[ $FILE == *"Data/"* && $FILE == *.sql ]]; then
+                  # Capture unified diff, filtering for additions
+                  DIFF_CHANGES=$(git diff origin/release..origin/main --unified=0 "$FILE" | grep '^[+ ]' | grep -v '+++')
+                  
+                  if [ -n "$DIFF_CHANGES" ]; then
+                      {
+                          echo -e "--------\nGO\n--------\n-- $FILE (Diff)\n--------"
+                          echo "$DIFF_CHANGES"
+                          echo -e "\n"
+                      } >> "$OUTPUT_FILE"
+                      
+                      DATA_COUNT=$((DATA_COUNT + 1))
+                      echo "| Data | Diffed | $FILE |" >> $GITHUB_STEP_SUMMARY
+                  fi
+              fi
+          done
+
+          # Final Summary Logic
+          echo -e "\n**Processing Results:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Stored Procedures added: $SP_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- Data scripts diffed: $DATA_COUNT" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $ERRORS -gt 0 ]; then
+              echo "- Validation Errors: $ERRORS" >> $GITHUB_STEP_SUMMARY
+              echo "Script execution terminated due to validation failure."
+              exit 1
+          fi
+
+          # Set output variables for use in subsequent steps
+          echo "SP_COUNT=$SP_COUNT" >> $GITHUB_OUTPUT
+          echo "DATA_COUNT=$DATA_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Commit and Push
+        if: success() && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto-generated SQL bundle [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
+          file_pattern: 'Output/*.sql'
