@@ -35,22 +35,31 @@ jobs:
           # Format expected: 20260218123000__SomeText.sql
           LAST_FILE=$(ls -1 Output/ | grep '__' | sort -r | head -n 1)
 
-          # 2. Determine the last release timestamp
-          # Check if Output exists AND has files
-          if [ -d "Output" ] && [ "$(ls -A Output/ 2>/dev/null)" ]; then
-              LAST_FILE=$(ls -1 Output/ | grep '__' | sort -r | head -n 1)
-              RAW_TS=$(echo "$LAST_FILE" | cut -d'_' -f1)
+          # Step-by-step check to prevent "ls" errors
+          if [ -d "Output" ]; then
+              echo "Output directory exists. Checking for files..."
               
-              # Reformat for Git (YYYY-MM-DD HH:MM:SS)
-              FORMATTED_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
+              # Capture file list safely
+              FILE_LIST=$(ls -1 Output/ 2>/dev/null | grep '__' || true)
               
-              echo "Last release file found: $LAST_FILE"
-              DIFF_RANGE="--since=\"$FORMATTED_TS\""
-          else
-              echo "Output folder missing or empty. This is the first release."
-              # Diff from the beginning of time
+              if [ -n "$FILE_LIST" ]; then
+                  LAST_FILE=$(echo "$FILE_LIST" | sort -r | head -n 1)
+                  echo "Found last file: $LAST_FILE"
+                  
+                  RAW_TS=$(echo "$LAST_FILE" | cut -d'_' -f1)
+                  # YYYYMMDDHHMMSS -> YYYY-MM-DD HH:MM:SS
+                  LAST_RELEASE_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
+              fi
+          fi
+          
+          # 2. Set Diff Range
+          if [ -z "$LAST_RELEASE_TS" ]; then
+              echo "Result: No previous timestamp. Processing all history."
               START_POINT=$(git rev-list --max-parents=0 HEAD)
               DIFF_RANGE="$START_POINT..HEAD"
+          else
+              echo "Result: Processing changes since $LAST_RELEASE_TS"
+              DIFF_RANGE="--since=\"$LAST_RELEASE_TS\""
           fi
 
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
