@@ -154,7 +154,19 @@ jobs:
           # Replace 'YOUR_ORG' and 'YOUR_REPO' with your actual names if not dynamic
           FILE_URL="https://github.com/${{ github.repository }}/blob/Release/${OUTPUT_FILE}"
           
-          echo "- Combined SQL file: [${OUTPUT_FILE}] (${FILE_URL})" >> $GITHUB_STEP_SUMMARY
+          echo "- Combined SQL file: [${OUTPUT_FILE}](${FILE_URL})" >> $GITHUB_STEP_SUMMARY
+          
+          # Extract unique commit titles since the last release
+          COMMIT_TITLES=$(git log $DIFF_RANGE --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
+
+          # Append to the summary
+          echo "### Change Log (Since Last Release)" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$COMMIT_TITLES" ]; then
+            echo "$COMMIT_TITLES" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "*No new commit messages found.*" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo -e "\n---\n" >> $GITHUB_STEP_SUMMARY
 
       - name: Commit and Push
         if: success() && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
