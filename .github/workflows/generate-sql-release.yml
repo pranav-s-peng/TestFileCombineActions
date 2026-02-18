@@ -120,7 +120,14 @@ jobs:
               # --- DATA SCRIPTS (Data/ folder) ---
               elif [[ $FILE == *"Data/"* && $FILE == *.sql ]]; then
                   # Get just the diffs since that timestamp
-                  DIFF_CHANGES=$(git log $DIFF_RANGE -p --unified=0 "$FILE" | grep -E '^\+' | grep -Ev '^\+\+\+' | sed 's/^+//g')
+                  # Inside the Data loop
+                  if [ -z "$LAST_RELEASE_TS" ]; then
+                      RAW_DIFF=$(git log "$START_POINT..HEAD" -p --unified=0 "$FILE")
+                  else
+                      RAW_DIFF=$(git log --since="$LAST_RELEASE_TS" -p --unified=0 "$FILE")
+                  fi
+                  
+                  DIFF_CHANGES=$(echo "$RAW_DIFF" | grep -E '^\+' | grep -Ev '^\+\+\+' | sed 's/^+//g')
                   
                   if [ -n "$DIFF_CHANGES" ]; then
                       {
