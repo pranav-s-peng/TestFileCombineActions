@@ -1,0 +1,6 @@
+GO
+DECLARE @TempVar NVARCHAR(MAX);
+UPDATE TempTbl SET Value = @TempVar;
+DELETE FROM TempTwoTbl;
+
+GO
