@@ -3,12 +3,13 @@ name: Generate SQL Release Bundle
 on:
   pull_request:
     branches:
-      - release
+      - Release
     types: [closed]
+  workflow_dispatch: # This enables the manual "Run" button
 
 jobs:
   generate-bundle:
-    if: github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
