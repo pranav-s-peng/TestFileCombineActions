@@ -18,31 +18,58 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 
+          fetch-depth: 0 # This fetches all branches and history
 
       - name: Process SQL Changes
         id: process_sql
         shell: bash
         run: |
+          # Fetch history so we can see past commits
+          git fetch --unshallow || git fetch --all
+
+          # 1. Find the last release timestamp from the Output folder
+          # Format expected: 20260218123000__SomeText.sql
+          LAST_FILE=$(ls -1 Output/ | grep '__' | sort -r | head -n 1)
+
+          if [ -z "$LAST_FILE" ]; then
+              echo "No previous release file found. Processing all history."
+              # Diff from the first commit ever
+              DIFF_RANGE=$(git rev-list --max-parents=0 HEAD)
+          else
+              # Extract YYYYMMDDHHMMSS from the filename
+              RAW_TS=$(echo "$LAST_FILE" | cut -d'_' -f1)
+              
+              # Reformat for Git (YYYY-MM-DD HH:MM:SS)
+              # e.g., 20260218173000 -> 2026-02-18 17:30:00
+              FORMATTED_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
+              
+              echo "Last release file: $LAST_FILE"
+              echo "Searching for changes since: $FORMATTED_TS"
+              DIFF_RANGE="--since=\"$FORMATTED_TS\""
+          fi
+
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
           OUTPUT_FILE="Output/${TIMESTAMP}__ReleaseBundle.sql"
           mkdir -p Output
+
+          # 2. Identify changed files
+          # Note: We use 'origin/Release' to ensure we see what's on the server
+          FILES=$(git log $DIFF_RANGE --name-only --pretty=format: | sort -u)
 
           # Initialize counters
           SP_COUNT=0
           DATA_COUNT=0
           ERRORS=0
 
-          # Identify changed files between branches
-          FILES=$(git diff origin/release..origin/main --name-only)
-
-          # Start Job Summary Table
           echo "### SQL Processing Report" >> $GITHUB_STEP_SUMMARY
           echo "| File Type | Status | File Name |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
 
           for FILE in $FILES; do
-              # --- STORED PROCEDURES (SP/ folder) ---
+              # Skip if file doesn't exist (deleted) or isn't in our target folders
+              if [ ! -f "$FILE" ]; then continue; fi
+              
+              # --- STORED PROCEDURES ---
               if [[ $FILE == *"SP/"* && $FILE == *.sql ]]; then
                   # Clean Windows line endings for reliable regex matching
                   CONTENT=$(cat "$FILE" | tr -d '\r')
@@ -66,8 +93,8 @@ jobs:
 
               # --- DATA SCRIPTS (Data/ folder) ---
               elif [[ $FILE == *"Data/"* && $FILE == *.sql ]]; then
-                  # Capture unified diff, filtering for additions
-                  DIFF_CHANGES=$(git diff origin/release..origin/main --unified=0 "$FILE" | grep '^[+ ]' | grep -v '+++')
+                  # Get just the diffs since that timestamp
+                  DIFF_CHANGES=$(git log $DIFF_RANGE -p --unified=0 "$FILE" | grep '^[+ ]' | grep -v '+++' | grep -v 'diff --git')
                   
                   if [ -n "$DIFF_CHANGES" ]; then
                       {
