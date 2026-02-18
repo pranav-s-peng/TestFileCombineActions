@@ -24,28 +24,33 @@ jobs:
         id: process_sql
         shell: bash
         run: |
-          # Fetch history so we can see past commits
-          git fetch --unshallow || git fetch --all
-
+          # 1. Handle Git History safely
+          # Only unshallow if the repo actually is shallow
+          if [ -f .git/shallow ]; then
+            git fetch --unshallow --tags
+          else
+            git fetch --all --tags
+          fi
           # 1. Find the last release timestamp from the Output folder
           # Format expected: 20260218123000__SomeText.sql
           LAST_FILE=$(ls -1 Output/ | grep '__' | sort -r | head -n 1)
 
-          if [ -z "$LAST_FILE" ]; then
-              echo "No previous release file found. Processing all history."
-              # Diff from the first commit ever
-              DIFF_RANGE=$(git rev-list --max-parents=0 HEAD)
-          else
-              # Extract YYYYMMDDHHMMSS from the filename
+          # 2. Determine the last release timestamp
+          # Check if Output exists AND has files
+          if [ -d "Output" ] && [ "$(ls -A Output/ 2>/dev/null)" ]; then
+              LAST_FILE=$(ls -1 Output/ | grep '__' | sort -r | head -n 1)
               RAW_TS=$(echo "$LAST_FILE" | cut -d'_' -f1)
               
               # Reformat for Git (YYYY-MM-DD HH:MM:SS)
-              # e.g., 20260218173000 -> 2026-02-18 17:30:00
               FORMATTED_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
               
-              echo "Last release file: $LAST_FILE"
-              echo "Searching for changes since: $FORMATTED_TS"
+              echo "Last release file found: $LAST_FILE"
               DIFF_RANGE="--since=\"$FORMATTED_TS\""
+          else
+              echo "Output folder missing or empty. This is the first release."
+              # Diff from the beginning of time
+              START_POINT=$(git rev-list --max-parents=0 HEAD)
+              DIFF_RANGE="$START_POINT..HEAD"
           fi
 
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
@@ -67,7 +72,7 @@ jobs:
 
           for FILE in $FILES; do
               # Skip if file doesn't exist (deleted) or isn't in our target folders
-              if [ ! -f "$FILE" ]; then continue; fi
+              if [ -z "$FILE" ] || [ ! -f "$FILE" ]; then continue; fi
               
               # --- STORED PROCEDURES ---
               if [[ $FILE == *"SP/"* && $FILE == *.sql ]]; then
