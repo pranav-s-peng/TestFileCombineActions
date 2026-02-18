@@ -1,5 +1,5 @@
 GO
-CREATE PROCEDURE [test].[FailME]
+CREATE OR ALTER PROCEDURE [test].[FailME]
 (
 	@Param1 INT,
 	@Param2 NVARCHAR(MAX) = ''
