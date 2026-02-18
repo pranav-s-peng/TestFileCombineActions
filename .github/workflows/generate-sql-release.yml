@@ -31,34 +31,39 @@ jobs:
           else
             git fetch --all --tags
           fi
-          # 1. Find the last release timestamp from the Output folder
-          # Format expected: 20260218123000__SomeText.sql
-          LAST_FILE=$(ls -1 Output/ | grep '__' | sort -r | head -n 1)
-
-          # Step-by-step check to prevent "ls" errors
-          if [ -d "Output" ]; then
-              echo "Output directory exists. Checking for files..."
-              
-              # Capture file list safely
-              FILE_LIST=$(ls -1 Output/ 2>/dev/null | grep '__' || true)
-              
-              if [ -n "$FILE_LIST" ]; then
-                  LAST_FILE=$(echo "$FILE_LIST" | sort -r | head -n 1)
-                  echo "Found last file: $LAST_FILE"
-                  
-                  RAW_TS=$(echo "$LAST_FILE" | cut -d'_' -f1)
-                  # YYYYMMDDHHMMSS -> YYYY-MM-DD HH:MM:SS
-                  LAST_RELEASE_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
-              fi
-          fi
           
-          # 2. Set Diff Range
+          LAST_RELEASE_TS=""
+
+          # 2. Check for Output folder without triggering ls immediately
+          if [ -d "Output" ]; then
+              echo "Output directory exists."
+              
+              # Get the newest file by name into a variable safely
+              # 2>/dev/null hides the error if the folder is empty
+              LAST_FILE=$(ls -1 Output/ 2>/dev/null | grep "__" | sort -r | head -n 1 || echo "")
+              
+              if [ -n "$LAST_FILE" ]; then
+                  echo "Found last release: $LAST_FILE"
+                  RAW_TS=$(echo "$LAST_FILE" | cut -d'_' -f1)
+                  
+                  # Reformat for Git: YYYY-MM-DD HH:MM:SS
+                  LAST_RELEASE_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
+              else
+                  echo "Output folder exists but no SQL bundle found."
+              fi
+          else
+              echo "Output folder does not exist yet."
+          fi
+
+          # 3. Determine Diff Range
           if [ -z "$LAST_RELEASE_TS" ]; then
-              echo "Result: No previous timestamp. Processing all history."
+              echo "Result: Processing all history."
+              # Use the very first commit hash
               START_POINT=$(git rev-list --max-parents=0 HEAD)
               DIFF_RANGE="$START_POINT..HEAD"
           else
               echo "Result: Processing changes since $LAST_RELEASE_TS"
+              # Important: use --since to capture everything after that timestamp
               DIFF_RANGE="--since=\"$LAST_RELEASE_TS\""
           fi
 
