@@ -150,11 +150,11 @@ jobs:
                   # Remove GOs from start and end only (Case Insensitive)
                   # 1. Strip leading GOs and newlines
                   # 2. Strip trailing GOs and newlines
-                  CLEAN_CONTENT=$(echo "$CONTENT" | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{N;ba' -e '}' | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{$d;N;ba' -e '}')                  
-                  
+                  CLEAN_CONTENT=$(echo "$CONTENT" | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{N;ba' -e '}' | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{$d;N;ba' -e '}')
                   {
                       echo "-- $DIR_SP/$(basename "$FILE")"
-                      echo "GO"
+                      # We ONLY echo GO if the CLEAN_CONTENT doesn't already start with one
+                      [[ ! "$CLEAN_CONTENT" =~ ^[[:space:]]*GO ]] && echo "GO"
                       echo "$CLEAN_CONTENT"
                       echo "" # Single newline for separation
                   } >> "$TEMP_SQL"
@@ -167,23 +167,21 @@ jobs:
                   # Get just the diffs since that timestamp
                   # Inside the Data loop
                   if [ -z "$LAST_RELEASE_TS" ]; then
-                      RAW_DIFF=$(git log "$START_POINT..HEAD" -p --unified=0 "$FILE")
+                      RAW_DIFF=$(git log "$START_POINT..HEAD" -p -U0 -I$'\r' "$FILE")
                   else
-                      RAW_DIFF=$(git log --since="$LAST_RELEASE_TS" -p --unified=0 "$FILE")
+                      RAW_DIFF=$(git log --since="$LAST_RELEASE_TS" -p -U0 -I$'\r' "$FILE")
                   fi
                   
-                  DIFF_CHANGES=$(echo "$RAW_DIFF" | grep -E '^\+' | grep -Ev '^\+\+\+' | sed 's/^+//g' | tr -d '\r')
+                  DIFF_CHANGES=$(echo "$RAW_DIFF" | tail -n +5 | grep -E "^+" | grep -Ev '^\+\+\+' | sed 's/^+//g' | tr -d '\r')
                   
                   if [ -n "$DIFF_CHANGES" ]; then
                       # Strip leading/trailing GOs from the diff     only
                       CLEAN_DIFF=$(echo "$DIFF_CHANGES" | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{N;ba' -e '}' | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{$d;N;ba' -e '}')
-                      # DIFF_CHANGES=$(echo "$DIFF_CHANGES" | sed -E ':a; /^[[:space:]]*GO[[:space:]]*$/I {N; s/^[[:space:]]*GO[[:space:]]*\n//I; ba;}' | sed -E ':a; /[[:space:]]*GO[[:space:]]*$/I {s/[[:space:]]*GO[[:space:]]*$//I; N; ba;}')
                       
                       {
                           echo "-- $DIR_DATA/$(basename "$FILE") (Diff)"
                           echo "GO"
                           echo "$CLEAN_DIFF"
-                          # echo "$DIFF_CHANGES"
                           echo "" # Single newline for separation
                       } >> "$TEMP_SQL"
                       
