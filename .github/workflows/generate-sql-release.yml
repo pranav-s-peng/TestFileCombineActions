@@ -241,10 +241,6 @@ jobs:
               exit 1
           fi
 
-          if [ "$INPUT_FAKE_RUN" == "false" ]; then
-
-          fi 
-          
           # Set output variables for use in subsequent steps
           echo "SP_COUNT=$SP_COUNT" >> $GITHUB_OUTPUT
           echo "DATA_COUNT=$DATA_COUNT" >> $GITHUB_OUTPUT
