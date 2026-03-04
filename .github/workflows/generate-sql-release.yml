@@ -108,7 +108,7 @@ jobs:
                   # Remove GOs from start and end only (Case Insensitive)
                   # 1. Strip leading GOs and newlines
                   # 2. Strip trailing GOs and newlines
-                  CONTENT=$(echo "$CONTENT" | sed -E ':a; /^[[:space:]]*GO[[:space:]]*$/I {N; s/^[[:space:]]*GO[[:space:]]*\n//I; ba;}' | sed -E ':a; /[[:space:]]*GO[[:space:]]*$/I {s/[[:space:]]*GO[[:space:]]*$//I; N; ba;}')
+                  CLEAN_CONTENT=$(echo "$CONTENT" | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{N;ba' -e '}' | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{$d;N;ba' -e '}')                  
                   
                   {
                       echo "-- SP/$(basename "$FILE")"
@@ -134,12 +134,14 @@ jobs:
                   
                   if [ -n "$DIFF_CHANGES" ]; then
                       # Strip leading/trailing GOs from the diff only
-                      DIFF_CHANGES=$(echo "$DIFF_CHANGES" | sed -E ':a; /^[[:space:]]*GO[[:space:]]*$/I {N; s/^[[:space:]]*GO[[:space:]]*\n//I; ba;}' | sed -E ':a; /[[:space:]]*GO[[:space:]]*$/I {s/[[:space:]]*GO[[:space:]]*$//I; N; ba;}')
+                      CLEAN_DIFF=$(echo "$DIFF_CHANGES" | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{N;ba' -e '}' | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{$d;N;ba' -e '}')
+                      # DIFF_CHANGES=$(echo "$DIFF_CHANGES" | sed -E ':a; /^[[:space:]]*GO[[:space:]]*$/I {N; s/^[[:space:]]*GO[[:space:]]*\n//I; ba;}' | sed -E ':a; /[[:space:]]*GO[[:space:]]*$/I {s/[[:space:]]*GO[[:space:]]*$//I; N; ba;}')
                       
                       {
                           echo "-- Data/$(basename "$FILE") (Diff)"
                           echo "GO"
-                          echo "$DIFF_CHANGES"
+                          echo "$CLEAN_DIFF"
+                          # echo "$DIFF_CHANGES"
                           echo "" # Single newline for separation
                       } >> "$OUTPUT_FILE"
                       
