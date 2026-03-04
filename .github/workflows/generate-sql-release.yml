@@ -6,14 +6,41 @@ on:
       - Release
     types: [closed]
   workflow_dispatch: # This enables the manual "Run" button
-
+    inputs:
+      fake_run:
+        description: 'Fake Run (Create artifact, NO commit/push)'
+        type: boolean
+        default: false
+      output_to_artifact:
+        description: 'Output Report to Artifact (Instead of Summary)'
+        type: boolean
+        default: false
+      file_description:
+        description: 'Suffix for the filename (Optional)'
+        type: string
+        required: false
+        
 jobs:
   generate-bundle:
     if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
+      
+    # Directories that will be checked/used
+    env:
+      # SP scripts folder to search.
+      DIR_SP: "SP"
+      # Data scripts folder to search.
+      DIR_DATA: "Data"
+      # Where to output final file.
+      DIR_OUTPUT: "Output"
+      
+      # Placeholders - no need to change
+      TEMP_SQL: "temp_bundle.sql"
+      REPORT_FILE: "summary_report.md"
+      REPO_NAME: ${{ github.event.repository.name }}
+      
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -24,7 +51,21 @@ jobs:
       - name: Process SQL Changes
         id: process_sql
         shell: bash
+        env:
+          # Mapping inputs to ENV for easier bash access
+          INPUT_FAKE_RUN: ${{ github.event.inputs.fake_run }}
+          INPUT_TO_ARTIFACT: ${{ github.event.inputs.output_to_artifact }}
+          INPUT_DESCRIPTION: ${{ github.event.inputs.file_description }}
         run: |
+        
+          # Initialize Report and Temp SQL file
+          touch $TEMP_SQL
+
+          # Initialize report
+          echo "### SQL Processing Report" > $REPORT_FILE
+          echo "| File Type | Status | File Name |" >> $REPORT_FILE
+          echo "| :--- | :--- | :--- |" >> $REPORT_FILE
+
           # 1. Handle Git History safely
           # Only unshallow if the repo actually is shallow
           if [ -f .git/shallow ]; then
@@ -36,12 +77,12 @@ jobs:
           LAST_RELEASE_TS=""
 
           # 2. Check for Output folder without triggering ls immediately
-          if [ -d "Output" ]; then
-              echo "Output directory exists."
+          if [ -d "$DIR_OUTPUT" ]; then
+              echo "Output directory '$DIR_OUTPUT' exists."
               
               # Get the newest file by name into a variable safely
               # 2>/dev/null hides the error if the folder is empty
-              LAST_FILE=$(ls -1 Output/ 2>/dev/null | grep "__" | sort -r | head -n 1 || echo "")
+              LAST_FILE=$(ls -1 "$DIR_OUTPUT" 2>/dev/null | grep "__" | sort -r | head -n 1 || echo "")
               
               if [ -n "$LAST_FILE" ]; then
                   echo "Found last release: $LAST_FILE"
@@ -51,15 +92,24 @@ jobs:
                   LAST_RELEASE_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
                   echo "Last release timestamp detected: $LAST_RELEASE_TS"
               else
-                  echo "Output folder exists but no SQL bundle found."
+                  echo "Output folder '$DIR_OUTPUT' exists but no SQL bundle found."
               fi
           else
-              echo "Output folder does not exist yet."
+              echo "Output folder '$DIR_OUTPUT' does not exist yet."
           fi
           
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
-          OUTPUT_FILE="Output/${TIMESTAMP}__ReleaseBundle.sql"
-          mkdir -p Output
+          
+          DESC_SUFFIX=""
+          if [ -n "$INPUT_DESCRIPTION" ]; then
+             DESC_SUFFIX="_$INPUT_DESCRIPTION"
+          fi
+          FINAL_FILENAME="${TIMESTAMP}__${REPO_NAME}${DESC_SUFFIX}.sql"
+          FULL_PATH="${DIR_OUTPUT}/${FINAL_FILENAME}"
+          
+          if [ "$INPUT_FAKE_RUN" != "true" ]; then
+            mkdir -p "$DIR_OUTPUT"
+          fi
 
           # 3. Identify changed files (The "If/Else" fix)
           if [ -z "$LAST_RELEASE_TS" ]; then
@@ -74,33 +124,25 @@ jobs:
               FILES=$(git log --since="$LAST_RELEASE_TS" --name-only --pretty=format: | sort -u)
               COMMIT_TITLES=$(git log --since="$LAST_RELEASE_TS" --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
           fi
-          
-          # 2. Identify changed files
-          # Note: We use 'origin/Release' to ensure we see what's on the server
-          #FILES=$(git log $DIFF_RANGE --name-only --pretty=format: | sort -u)
 
           # Initialize counters
           SP_COUNT=0
           DATA_COUNT=0
           ERRORS=0
 
-          echo "### SQL Processing Report" >> $GITHUB_STEP_SUMMARY
-          echo "| File Type | Status | File Name |" >> $GITHUB_STEP_SUMMARY
-          echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-
           for FILE in $FILES; do
               # Skip if file doesn't exist (deleted) or isn't in our target folders
               if [ -z "$FILE" ] || [ ! -f "$FILE" ]; then continue; fi
               
               # --- STORED PROCEDURES ---
-              if [[ $FILE == *"SP/"* && $FILE == *.sql ]]; then
+              if [[ $FILE == *"$DIR_SP/"* && $FILE == *.sql ]]; then
                   # Clean Windows line endings for reliable regex matching
                   CONTENT=$(cat "$FILE" | tr -d '\r' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')
                   
                   # Validation for CREATE OR ALTER PROCEDURE
                   if [[ ! "$CONTENT" =~ ([[:space:]]*(GO)?)*[[:space:]]*CREATE[[:space:]]+OR[[:space:]]+ALTER[[:space:]]+PROCEDURE ]]; then
-                      echo "| SP | FAILED | $FILE |" >> $GITHUB_STEP_SUMMARY
-                      echo "::error::Validation Failed: $FILE is missing 'CREATE OR ALTER PROCEDURE'."
+                      echo "| SP | FAILED | $FILE |" >> $REPORT_FILE
+                      echo "::error::Validation Failed: File '$FILE' is missing 'CREATE OR ALTER PROCEDURE'."
                       ERRORS=$((ERRORS + 1))
                       continue
                   fi
@@ -111,17 +153,17 @@ jobs:
                   CLEAN_CONTENT=$(echo "$CONTENT" | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{N;ba' -e '}' | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{$d;N;ba' -e '}')                  
                   
                   {
-                      echo "-- SP/$(basename "$FILE")"
+                      echo "-- $DIR_SP/$(basename "$FILE")"
                       echo "GO"
-                      echo "$CONTENT"
+                      echo "$CLEAN_CONTENT"
                       echo "" # Single newline for separation
-                  } >> "$OUTPUT_FILE"
+                  } >> "$TEMP_SQL"
                   
                   SP_COUNT=$((SP_COUNT + 1))
-                  echo "| SP | Added | $FILE |" >> $GITHUB_STEP_SUMMARY
+                  echo "| SP | Added | $FILE |" >> $REPORT_FILE
 
               # --- DATA SCRIPTS (Data/ folder) ---
-              elif [[ $FILE == *"Data/"* && $FILE == *.sql ]]; then
+              elif [[ $FILE == *"$DIR_DATA/"* && $FILE == *.sql ]]; then
                   # Get just the diffs since that timestamp
                   # Inside the Data loop
                   if [ -z "$LAST_RELEASE_TS" ]; then
@@ -133,28 +175,65 @@ jobs:
                   DIFF_CHANGES=$(echo "$RAW_DIFF" | grep -E '^\+' | grep -Ev '^\+\+\+' | sed 's/^+//g' | tr -d '\r')
                   
                   if [ -n "$DIFF_CHANGES" ]; then
-                      # Strip leading/trailing GOs from the diff only
+                      # Strip leading/trailing GOs from the diff     only
                       CLEAN_DIFF=$(echo "$DIFF_CHANGES" | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{N;ba' -e '}' | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{$d;N;ba' -e '}')
                       # DIFF_CHANGES=$(echo "$DIFF_CHANGES" | sed -E ':a; /^[[:space:]]*GO[[:space:]]*$/I {N; s/^[[:space:]]*GO[[:space:]]*\n//I; ba;}' | sed -E ':a; /[[:space:]]*GO[[:space:]]*$/I {s/[[:space:]]*GO[[:space:]]*$//I; N; ba;}')
                       
                       {
-                          echo "-- Data/$(basename "$FILE") (Diff)"
+                          echo "-- $DIR_DATA/$(basename "$FILE") (Diff)"
                           echo "GO"
                           echo "$CLEAN_DIFF"
                           # echo "$DIFF_CHANGES"
                           echo "" # Single newline for separation
-                      } >> "$OUTPUT_FILE"
+                      } >> "$TEMP_SQL"
                       
                       DATA_COUNT=$((DATA_COUNT + 1))
-                      echo "| Data | Diffed | $FILE |" >> $GITHUB_STEP_SUMMARY
+                      echo "| Data | Diffed | $FILE |" >> $REPORT_FILE
                   fi
               fi
           done
 
+          # 2. BUILD CHANGELOG (Requested Format)
+          echo -e "\n### Changelog (since last release):" >> $REPORT_FILE
+          
+          # Format: <date> - <commit hash> - <commit msg>
+          if [ -z "$LAST_RELEASE_TS" ]; then
+              CHANGELOG=$(git log "$START_POINT..HEAD" --no-merges --pretty=format:"%ad - %h - %s" --date=format:'%Y-%m-%d %H:%M:%S' | grep -v "Auto-generated SQL bundle")
+          else
+              CHANGELOG=$(git log --since="$LAST_RELEASE_TS" --no-merges --pretty=format:"%ad - %h - %s" --date=format:'%Y-%m-%d %H:%M:%S' | grep -v "Auto-generated SQL bundle")
+          fi
+          
+          if [ -n "$CHANGELOG" ]; then
+              echo "$CHANGELOG" >> $REPORT_FILE
+          else
+              echo "*No new commits found.*" >> $REPORT_FILE
+          fi
+          
           # Final Summary Logic
           echo -e "\n**Processing Results:**" >> $GITHUB_STEP_SUMMARY
           echo "- Stored Procedures added: $SP_COUNT" >> $GITHUB_STEP_SUMMARY
           echo "- Data scripts diffed: $DATA_COUNT" >> $GITHUB_STEP_SUMMARY
+          
+          # Finalize Logic
+          if [[ "$SP_COUNT" -gt 0 || "$DATA_COUNT" -gt 0 ]]; then
+            if [ "$INPUT_FAKE_RUN" == "true" ]; then
+               echo "FAKE_RUN=true" >> $GITHUB_OUTPUT
+               echo -e "\n**[!] FAKE RUN: SQL file saved as artifact only.**" >> $REPORT_FILE
+            else
+               mkdir -p "$DIR_OUTPUT"
+               mv "$TEMP_SQL" "$FULL_PATH"
+               echo "FAKE_RUN=false" >> $GITHUB_OUTPUT
+               echo "Output SQL file: [${FINAL_FILENAME}](https://github.com/${{ github.repository }}/blob/Release/${FULL_PATH})" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "No changes found. Nothing to output." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "$INPUT_TO_ARTIFACT" == "true" ]; then
+             echo "REPORT_TO_ARTIFACT=true" >> $GITHUB_OUTPUT
+          else
+             cat "$REPORT_FILE" >> $GITHUB_STEP_SUMMARY
+          fi
           
           if [ $ERRORS -gt 0 ]; then
               echo "- Validation Errors: $ERRORS" >> $GITHUB_STEP_SUMMARY
@@ -162,37 +241,36 @@ jobs:
               exit 1
           fi
 
+          if [ "$INPUT_FAKE_RUN" == "false" ]; then
+
+          fi 
+          
           # Set output variables for use in subsequent steps
           echo "SP_COUNT=$SP_COUNT" >> $GITHUB_OUTPUT
           echo "DATA_COUNT=$DATA_COUNT" >> $GITHUB_OUTPUT
+          echo "FINAL_FILENAME=$FINAL_FILENAME" >> $GITHUB_OUTPUT
           
-          # Final Summary Logic
-          echo -e "\n**Files created on release:**" >> $GITHUB_STEP_SUMMARY
+      # 1. Artifact for SQL File (Only on Fake Run)
+      - name: Upload SQL Bundle Artifact
+        if: steps.process_sql.outputs.FAKE_RUN == 'true' && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.process_sql.outputs.FINAL_FILENAME }}
+          path: '${{ env.TEMP_SQL }}'
           
-          # Construct the URL to the file in the Release branch
-          # Replace 'YOUR_ORG' and 'YOUR_REPO' with your actual names if not dynamic
-          FILE_URL="https://github.com/${{ github.repository }}/blob/Release/${OUTPUT_FILE}"
+      - name: Upload Report Artifact
+        if: steps.process_sql.outputs.REPORT_TO_ARTIFACT == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-release-summary
+          path: '${{ env.REPORT_FILE }}'
           
-          echo "- Combined SQL file: [${OUTPUT_FILE}](${FILE_URL})" >> $GITHUB_STEP_SUMMARY
-          
-          # Extract unique commit titles since the last release
-          #COMMIT_TITLES=$(git log $DIFF_RANGE --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
-
-          # Append to the summary
-          echo "### Change Log (Since Last Release)" >> $GITHUB_STEP_SUMMARY
-          if [ -n "$COMMIT_TITLES" ]; then
-            echo "$COMMIT_TITLES" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "*No new commit messages found.*" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo -e "\n---\n" >> $GITHUB_STEP_SUMMARY
-
       - name: Commit and Push
-        if: success() && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        if: success() && steps.process_sql.outputs.FAKE_RUN == 'false' && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           branch: Release  # Force the commit to go to your Release branch
           commit_message: "Auto-generated SQL bundle [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
-          file_pattern: 'Output/*.sql'
+          file_pattern: '${{ env.DIR_OUTPUT }}/*.sql'
           # Optional: ensures the local branch is up to date before pushing
           push_options: '--force'
