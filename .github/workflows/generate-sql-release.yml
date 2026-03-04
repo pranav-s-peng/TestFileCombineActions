@@ -175,12 +175,12 @@ jobs:
                   DIFF_CHANGES=$(echo "$RAW_DIFF" | tail -n +5 | grep -E "^\+" | grep -Ev '^\+\+\+' | sed 's/^\+//g' | tr -d '\r' | sed 's/[[:space:]]*$//')
                   
                   if [ -n "$DIFF_CHANGES" ]; then
-                      # Strip leading/trailing GOs from the diff     only
+                      # Strip leading/trailing GOs from the diff only
                       CLEAN_DIFF=$(echo "$DIFF_CHANGES" | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{N;ba' -e '}' | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{$d;N;ba' -e '}')
                       
                       {
                           echo "-- $DIR_DATA/$(basename "$FILE") (Diff)"
-                          echo "GO"
+                          [[ ! "$CLEAN_DIFF" =~ ^[[:space:]]*GO ]] && echo "GO"
                           echo "$CLEAN_DIFF"
                           echo "" # Single newline for separation
                       } >> "$TEMP_SQL"
@@ -214,6 +214,7 @@ jobs:
           
           # Finalize Logic
           if [[ "$SP_COUNT" -gt 0 || "$DATA_COUNT" -gt 0 ]]; then
+            echo "-- End of changes" >> "$TEMP_SQL"
             echo "GO" >> "$TEMP_SQL" # Safety
             
             if [ "$INPUT_FAKE_RUN" == "true" ]; then
