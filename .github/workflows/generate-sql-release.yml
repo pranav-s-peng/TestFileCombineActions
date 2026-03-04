@@ -226,6 +226,7 @@ jobs:
                echo "Output SQL file: [${FINAL_FILENAME}](https://github.com/${{ github.repository }}/blob/Release/${FULL_PATH})" >> $GITHUB_STEP_SUMMARY
             fi
           else
+            echo "FAKE_RUN=false" >> $GITHUB_OUTPUT
             echo "No changes found. Nothing to output." >> $GITHUB_STEP_SUMMARY
           fi
           
