@@ -2,9 +2,10 @@ GO
 CREATE OR ALTER PROCEDURE [test].[FailME]
 (
 	@Param1 INT = NULL,
-	@Param2 NVARCHAR(MAX) = ''
+	@Param2 NVARCHAR(MAX) = '',
+	@Param3 NVARCHAR(MAX) = ''
 )
 AS
 BEGIN
-	SELECT 150;
+	SELECT 199;
 END

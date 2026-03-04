@@ -7,3 +7,8 @@ GO
 
 DECLARE @TmpTwo INT = 1;
 UPDATE TempTbl SET VarValue = @TmpTwo;
+
+GO
+
+DECLARE @TmpThree INT = 1;
+UPDATE TempTbl SET VarValue = @TmpThree;
