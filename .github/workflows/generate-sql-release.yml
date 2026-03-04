@@ -172,7 +172,7 @@ jobs:
                       RAW_DIFF=$(git log --since="$LAST_RELEASE_TS" -p -U0 -I$'\r' "$FILE")
                   fi
                   
-                  DIFF_CHANGES=$(echo "$RAW_DIFF" | tail -n +5 | grep -E "^+" | grep -Ev '^\+\+\+' | sed 's/^+//g' | tr -d '\r')
+                  DIFF_CHANGES=$(echo "$RAW_DIFF" | tail -n +5 | grep -E "^\+" | grep -Ev '^\+\+\+' | sed 's/^\+//g' | tr -d '\r' | sed 's/[[:space:]]*$//')
                   
                   if [ -n "$DIFF_CHANGES" ]; then
                       # Strip leading/trailing GOs from the diff     only
@@ -215,6 +215,7 @@ jobs:
           # Finalize Logic
           if [[ "$SP_COUNT" -gt 0 || "$DATA_COUNT" -gt 0 ]]; then
             if [ "$INPUT_FAKE_RUN" == "true" ]; then
+               mv "$TEMP_SQL" "$FINAL_FILENAME"
                echo "FAKE_RUN=true" >> $GITHUB_OUTPUT
                echo -e "\n**[!] FAKE RUN: SQL file saved as artifact only.**" >> $REPORT_FILE
             else
@@ -244,21 +245,31 @@ jobs:
           echo "SP_COUNT=$SP_COUNT" >> $GITHUB_OUTPUT
           echo "DATA_COUNT=$DATA_COUNT" >> $GITHUB_OUTPUT
           echo "FINAL_FILENAME=$FINAL_FILENAME" >> $GITHUB_OUTPUT
+      
+      - name: Upload Combined Artifacts
+        if: always() && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            ${{ env.REPORT_FILE }}
+            ${{ steps.process_sql.outputs.FINAL_FILENAME }}
+          if-no-files-found: ignore # Prevents errors if one path doesn't exist
           
       # 1. Artifact for SQL File (Only on Fake Run)
-      - name: Upload SQL Bundle Artifact
-        if: steps.process_sql.outputs.FAKE_RUN == 'true' && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.process_sql.outputs.FINAL_FILENAME }}
-          path: '${{ env.TEMP_SQL }}'
+      # - name: Upload SQL Bundle Artifact
+        # if: steps.process_sql.outputs.FAKE_RUN == 'true' && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        # uses: actions/upload-artifact@v4
+        # with:
+          # name: release-artifacts
+          # path: '${{ env.TEMP_SQL }}'
           
-      - name: Upload Report Artifact
-        if: steps.process_sql.outputs.REPORT_TO_ARTIFACT == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: sql-release-summary
-          path: '${{ env.REPORT_FILE }}'
+      # - name: Upload Report Artifact
+        # if: steps.process_sql.outputs.REPORT_TO_ARTIFACT == 'true'
+        # uses: actions/upload-artifact@v4
+        # with:
+          # name: release-artifacts
+          # path: '${{ env.REPORT_FILE }}'
           
       - name: Commit and Push
         if: success() && steps.process_sql.outputs.FAKE_RUN == 'false' && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
