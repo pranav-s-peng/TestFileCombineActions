@@ -167,9 +167,9 @@ jobs:
                   # Get just the diffs since that timestamp
                   # Inside the Data loop
                   if [ -z "$LAST_RELEASE_TS" ]; then
-                      RAW_DIFF=$(git log "$START_POINT..HEAD" -p -U0 -I$'\r' "$FILE")
+                      RAW_DIFF=$(git log "$START_POINT..HEAD" -p --unified=0 -I$'\r' --ignore-cr-at-eol "$FILE")
                   else
-                      RAW_DIFF=$(git log --since="$LAST_RELEASE_TS" -p -U0 -I$'\r' "$FILE")
+                      RAW_DIFF=$(git log --since="$LAST_RELEASE_TS" -p --unified=0 -I$'\r' --ignore-cr-at-eol "$FILE")
                   fi
                   
                   DIFF_CHANGES=$(echo "$RAW_DIFF" | tail -n +5 | grep -E "^\+" | grep -Ev '^\+\+\+' | sed 's/^\+//g' | tr -d '\r' | sed 's/[[:space:]]*$//')
@@ -214,6 +214,8 @@ jobs:
           
           # Finalize Logic
           if [[ "$SP_COUNT" -gt 0 || "$DATA_COUNT" -gt 0 ]]; then
+            echo "GO" >> "$TEMP_SQL" # Safety
+            
             if [ "$INPUT_FAKE_RUN" == "true" ]; then
                mv "$TEMP_SQL" "$FINAL_FILENAME"
                echo "FAKE_RUN=true" >> $GITHUB_OUTPUT
