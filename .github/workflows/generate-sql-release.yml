@@ -56,7 +56,7 @@ jobs:
       
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Removed since we r regexing for release branches
           #ref: Release  # Ensure we are working on the Release branch files
@@ -259,7 +259,7 @@ jobs:
       
       - name: Upload Combined Artifacts
         if: always() && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-artifacts
           path: |
@@ -270,7 +270,7 @@ jobs:
       # Step for: 0 - Release only OR 1 - Release & main
       - name: Commit to Release Branch
         if: success() && github.event.inputs.fake_run != 'true' && (env.INPUT_COMMIT_TO == '0' || env.INPUT_COMMIT_TO == '1') && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           branch: Release
           commit_message: "Auto-generated SQL bundle (Release) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
@@ -280,7 +280,7 @@ jobs:
       - name: Commit to Main Branch
         if: success() && github.event.inputs.fake_run != 'true' && (env.INPUT_COMMIT_TO == '1' || env.INPUT_COMMIT_TO == '2') && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
         id: push_to_main
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           branch: main
           commit_message: "Auto-generated SQL bundle (Main) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
@@ -289,7 +289,7 @@ jobs:
       # Alternative create PR instead of committing to main branch (branch protection case)
       - name: Create PR to Main
         if: success() && steps.push_to_main.outcome == 'failure' && github.event.inputs.fake_run != 'true' && (env.INPUT_COMMIT_TO == '1' || env.INPUT_COMMIT_TO == '2') && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: sync-sql-bundle-${{ github.run_id }} # Unique branch name
