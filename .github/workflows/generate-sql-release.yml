@@ -192,7 +192,7 @@ jobs:
           done
 
           # 2. BUILD CHANGELOG (Requested Format)
-          echo -e "\n### Changelog (since last release):" >> $REPORT_FILE
+          echo -e "\n### Changelog (since last release on $LAST_RELEASE_TS):" >> $REPORT_FILE
           
           # Format: <date> - <commit hash> - <commit msg>
           if [ -z "$LAST_RELEASE_TS" ]; then
@@ -234,6 +234,7 @@ jobs:
           
           if [ "$INPUT_TO_ARTIFACT" == "true" ]; then
              echo "REPORT_TO_ARTIFACT=true" >> $GITHUB_OUTPUT
+             echo "Detailed report has been moved to artifacts." >> $GITHUB_STEP_SUMMARY
           else
              cat "$REPORT_FILE" >> $GITHUB_STEP_SUMMARY
           fi
