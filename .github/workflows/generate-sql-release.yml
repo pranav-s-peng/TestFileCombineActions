@@ -3,6 +3,7 @@ name: Generate SQL Release Bundle
 on:
   pull_request:
     branches:
+      - '*_Release'  # Matches DEV_Release, SIT_Release.
       - Release
     types: [closed]
   workflow_dispatch: # This enables the manual "Run" button
@@ -15,6 +16,10 @@ on:
         description: 'Output Report to Artifact (Instead of Summary)'
         type: boolean
         default: false
+      commit_to:
+        description: 'Commits to (0 - Release only [default], 1 - Release & main, 2 - main only)'
+        type: integer
+        default: 0
       file_description:
         description: 'Suffix for the filename (Optional)'
         type: string
@@ -26,9 +31,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
       
-    # Directories that will be checked/used
     env:
+      # Directories that will be checked/used
+      
       # SP scripts folder to search.
       DIR_SP: "SP"
       # Data scripts folder to search.
@@ -41,21 +48,23 @@ jobs:
       REPORT_FILE: "summary_report.md"
       REPO_NAME: ${{ github.event.repository.name }}
       
+      # Inputs to workflow
+      INPUT_FAKE_RUN: ${{ github.event.inputs.fake_run }}
+      INPUT_TO_ARTIFACT: ${{ github.event.inputs.output_to_artifact }}
+      INPUT_COMMIT_TO: ${{ github.event.inputs.commit_to || 0 }}
+      INPUT_DESCRIPTION: ${{ github.event.inputs.file_description }}
+      
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          ref: Release  # Ensure we are working on the Release branch files
+          # Removed since we r regexing for release branches
+          #ref: Release  # Ensure we are working on the Release branch files
           fetch-depth: 0 # This fetches all branches and history
 
       - name: Process SQL Changes
         id: process_sql
         shell: bash
-        env:
-          # Mapping inputs to ENV for easier bash access
-          INPUT_FAKE_RUN: ${{ github.event.inputs.fake_run }}
-          INPUT_TO_ARTIFACT: ${{ github.event.inputs.output_to_artifact }}
-          INPUT_DESCRIPTION: ${{ github.event.inputs.file_description }}
         run: |
         
           # Initialize Report and Temp SQL file
@@ -66,7 +75,7 @@ jobs:
           echo "| File Type | Status | File Name |" >> $REPORT_FILE
           echo "| :--- | :--- | :--- |" >> $REPORT_FILE
 
-          # 1. Handle Git History safely
+          # Handle Git History safely
           # Only unshallow if the repo actually is shallow
           if [ -f .git/shallow ]; then
             git fetch --unshallow --tags
@@ -76,7 +85,7 @@ jobs:
           
           LAST_RELEASE_TS=""
 
-          # 2. Check for Output folder without triggering ls immediately
+          # Check for Output folder without triggering ls immediately
           if [ -d "$DIR_OUTPUT" ]; then
               echo "Output directory '$DIR_OUTPUT' exists."
               
@@ -111,7 +120,7 @@ jobs:
             mkdir -p "$DIR_OUTPUT"
           fi
 
-          # 3. Identify changed files (The "If/Else" fix)
+          # Identify changed files
           if [ -z "$LAST_RELEASE_TS" ]; then
               echo "Result: Processing all history."
               # Use the range syntax for first run
@@ -147,9 +156,7 @@ jobs:
                       continue
                   fi
 
-                  # Remove GOs from start and end only (Case Insensitive)
-                  # 1. Strip leading GOs and newlines
-                  # 2. Strip trailing GOs and newlines
+                  # Remove leading n trailing GOs, newlines from start and end only (Case Insensitive)
                   CLEAN_CONTENT=$(echo "$CONTENT" | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{N;ba' -e '}' | sed -e :a -e '/^\([[:space:]]*GO[[:space:]]*\|[[:space:]]*\)$/I{$d;N;ba' -e '}')
                   {
                       echo "-- $DIR_SP/$(basename "$FILE")"
@@ -191,7 +198,7 @@ jobs:
               fi
           done
 
-          # 2. BUILD CHANGELOG (Requested Format)
+          # BUILD CHANGELOG (Requested Format)
           echo -e "\n### Changelog (since last release on $LAST_RELEASE_TS):" >> $REPORT_FILE
           
           # Format: <date> - <commit hash> - <commit msg>
@@ -260,27 +267,37 @@ jobs:
             ${{ steps.process_sql.outputs.FINAL_FILENAME }}
           if-no-files-found: ignore # Prevents errors if one path doesn't exist
           
-      # 1. Artifact for SQL File (Only on Fake Run)
-      # - name: Upload SQL Bundle Artifact
-        # if: steps.process_sql.outputs.FAKE_RUN == 'true' && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
-        # uses: actions/upload-artifact@v4
-        # with:
-          # name: release-artifacts
-          # path: '${{ env.TEMP_SQL }}'
-          
-      # - name: Upload Report Artifact
-        # if: steps.process_sql.outputs.REPORT_TO_ARTIFACT == 'true'
-        # uses: actions/upload-artifact@v4
-        # with:
-          # name: release-artifacts
-          # path: '${{ env.REPORT_FILE }}'
-          
-      - name: Commit and Push
-        if: success() && steps.process_sql.outputs.FAKE_RUN == 'false' && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+      # Step for: 0 - Release only OR 1 - Release & main
+      - name: Commit to Release Branch
+        if: success() && github.event.inputs.fake_run != 'true' && (env.INPUT_COMMIT_TO == '0' || env.INPUT_COMMIT_TO == '1') && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          branch: Release  # Force the commit to go to your Release branch
-          commit_message: "Auto-generated SQL bundle [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
+          branch: Release
+          commit_message: "Auto-generated SQL bundle (Release) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
           file_pattern: '${{ env.DIR_OUTPUT }}/*.sql'
-          # Optional: ensures the local branch is up to date before pushing
-          push_options: '--force'
+          
+      # Step for: 1 - Release & main OR 2 - main only
+      - name: Commit to Main Branch
+        if: success() && github.event.inputs.fake_run != 'true' && (env.INPUT_COMMIT_TO == '1' || env.INPUT_COMMIT_TO == '2') && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        id: push_to_main
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          branch: main
+          commit_message: "Auto-generated SQL bundle (Main) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
+          file_pattern: '${{ env.DIR_OUTPUT }}/${{ steps.process_sql.outputs.FINAL_FILENAME }}'
+
+      # Alternative create PR instead of committing to main branch (branch protection case)
+      - name: Create PR to Main
+        if: success() && steps.push_to_main.outcome == 'failure' && github.event.inputs.fake_run != 'true' && (env.INPUT_COMMIT_TO == '1' || env.INPUT_COMMIT_TO == '2') && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: sync-sql-bundle-${{ github.run_id }} # Unique branch name
+          base: main
+          title: "SQL Bundle: ${{ steps.process_sql.outputs.FINAL_FILENAME }}"
+          body: "Since main branch has branch protection, this is an automated PR containing the latest SQL release bundle generated from the Release branch."
+          commit-message: "Add auto-generated SQL bundle for main"
+          add-paths: |
+            ${{ env.DIR_OUTPUT }}/${{ steps.process_sql.outputs.FINAL_FILENAME }}
+          delete-branch: true # Deletes the temporary branch once merged
+            
