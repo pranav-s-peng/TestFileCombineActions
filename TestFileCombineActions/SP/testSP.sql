@@ -2,9 +2,11 @@ GO
 CREATE OR ALTER PROCEDURE [test].[SomeSP]
 (
 	@Param1 INT,
-	@Param2 NVARCHAR(MAX) = ''
+	@Param2 NVARCHAR(MAX) = '',
+	@Param3 INT
 )
 AS
 BEGIN
 	SELECT 0;
+	SELECT 1;
 END
