@@ -9,4 +9,5 @@ AS
 BEGIN
 	SELECT 0;
 	SELECT 1;
+	SElect 2;
 END
