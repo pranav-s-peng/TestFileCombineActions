@@ -12,3 +12,9 @@ GO
 
 DECLARE @TmpThree INT = 1;
 UPDATE TempTbl SET VarValue = @TmpThree;
+
+GO
+DECLARE @Something INT;
+UPDATE SomeTbl SET Something = @Something;
+GO
+
