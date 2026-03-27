@@ -19,3 +19,4 @@ UPDATE SomeTbl SET Something = @Something;
 GO
 
 DECLARE @Test INT;
+DECLARE @SomeOtherThing INT;
