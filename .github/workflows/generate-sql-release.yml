@@ -5,7 +5,7 @@ on:
     branches:
       - '*_Release'  # Matches DEV_Release, SIT_Release.
       - Release
-    path:
+    paths:
       - '**/DB/SP/**'
       - '**/DB/Data/**'
       
