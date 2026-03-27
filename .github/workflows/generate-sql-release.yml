@@ -1,11 +1,14 @@
 name: Generate SQL Release Bundle
 
 on:
-  pull_request:
+  push:
     branches:
       - '*_Release'  # Matches DEV_Release, SIT_Release.
       - Release
-    types: [closed]
+    path:
+      - '**/DB/SP/**'
+      - '**/DB/Data/**'
+      
   workflow_dispatch: # This enables the manual "Run" button
     inputs:
       fake_run:
@@ -17,9 +20,16 @@ on:
         type: boolean
         default: false
       commit_to:
-        description: 'Commits to (0 - Release & main [default], 1 - Release only, 2 - main only)'
-        type: integer
-        default: 0
+        # description: 'Commits to (0 - Release & main [default], 1 - Release only, 2 - main only)'
+        # type: integer
+        # default: 0
+        description: 'Which branch to commit the changes to?'
+        type: choice
+        options:
+          - 'Both'
+          - 'Release Only'
+          - 'Main Only'
+        default: 'Both'
       file_description:
         description: 'Suffix for the filename (Optional)'
         type: string
@@ -27,7 +37,7 @@ on:
         
 jobs:
   generate-bundle:
-    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -37,11 +47,11 @@ jobs:
       # Directories that will be checked/used
       
       # SP scripts folder to search.
-      DIR_SP: "SP"
+      DIR_SP: "DB/SP"
       # Data scripts folder to search.
-      DIR_DATA: "Data"
+      DIR_DATA: "DB/Data"
       # Where to output final file.
-      DIR_OUTPUT: "Output"
+      DIR_OUTPUT: "Output/Main"
       
       # Placeholders - no need to change
       TEMP_SQL: "temp_bundle.sql"
@@ -51,7 +61,7 @@ jobs:
       # Inputs to workflow
       INPUT_FAKE_RUN: ${{ github.event.inputs.fake_run }}
       INPUT_TO_ARTIFACT: ${{ github.event.inputs.output_to_artifact }}
-      INPUT_COMMIT_TO: ${{ github.event.inputs.commit_to || 0 }}
+      INPUT_COMMIT_TO: ${{ github.event.inputs.commit_to || 'Both' }}
       INPUT_DESCRIPTION: ${{ github.event.inputs.file_description }}
       
     steps:
@@ -244,6 +254,7 @@ jobs:
              echo "Detailed report has been moved to artifacts." >> $GITHUB_STEP_SUMMARY
           else
              cat "$REPORT_FILE" >> $GITHUB_STEP_SUMMARY
+             rm "$REPORT_FILE"
           fi
           
           if [ $ERRORS -gt 0 ]; then
@@ -269,7 +280,11 @@ jobs:
           
       # Step for: 0 - Release only OR 1 - Release & main
       - name: Commit to Release Branch
-        if: success() && github.event.inputs.fake_run != 'true' && (env.INPUT_COMMIT_TO == '0' || env.INPUT_COMMIT_TO == '1') && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        if: >
+            success() &&
+            github.event.inputs.fake_run != 'true' &&
+            (env.INPUT_COMMIT_TO == 'Both' || env.INPUT_COMMIT_TO == 'Release Only') &&
+            (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
           branch: Release
@@ -278,7 +293,11 @@ jobs:
           
       # Step for: 1 - Release & main OR 2 - main only
       - name: Commit to Main Branch
-        if: success() && github.event.inputs.fake_run != 'true' && (env.INPUT_COMMIT_TO == '0' || env.INPUT_COMMIT_TO == '2') && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        if: >
+            success() && 
+            github.event.inputs.fake_run != 'true' &&
+            (env.INPUT_COMMIT_TO == 'Both' || env.INPUT_COMMIT_TO == 'Main Only') &&
+            (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
         id: push_to_main
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
@@ -288,7 +307,12 @@ jobs:
 
       # Alternative create PR instead of committing to main branch (branch protection case)
       - name: Create PR to Main
-        if: success() && steps.push_to_main.outcome == 'failure' && github.event.inputs.fake_run != 'true' && (env.INPUT_COMMIT_TO == '0' || env.INPUT_COMMIT_TO == '2') && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        if: >
+            success() && 
+            steps.push_to_main.outcome == 'failure' && 
+            github.event.inputs.fake_run != 'true' && 
+            (env.INPUT_COMMIT_TO == 'Both' || env.INPUT_COMMIT_TO == 'Main Only') && 
+            (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
         uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
