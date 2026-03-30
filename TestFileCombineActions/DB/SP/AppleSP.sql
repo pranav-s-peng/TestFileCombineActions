@@ -6,6 +6,7 @@ CREATE OR ALTER PROCEDURE AppleSP
 AS
 BEGIN
 	SELECT 'Testing testing 1 2 3 crunch'
+	SELECT '123 yay';
 END
 
 
