@@ -243,6 +243,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          
           # 1. Configure local git for the runner
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
