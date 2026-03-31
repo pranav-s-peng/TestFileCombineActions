@@ -287,7 +287,7 @@ jobs:
           echo "Enabling auto-merge for PR #$PR_NUMBER..."
           
           # Attempt to enable auto-merge (requires repo setting 'Allow auto-merge' to be ON)
-          if gh pr merge "$PR_NUMBER" --merge --auto; then
+          if gh pr merge "$PR_NUMBER" --merge --auto --delete-branch; then
             echo "SUCCESS: Auto-merge enabled for PR #$PR_NUMBER."
           else
             echo "::error::Warning: Failed to enable auto-merge for PR #$PR_NUMBER. Manually merge the PR."
