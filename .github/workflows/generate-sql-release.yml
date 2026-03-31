@@ -40,7 +40,8 @@ jobs:
           ref: ${{ github.ref_name }}
           #ref: Release  # Ensure we are working on the Release branch files
           fetch-depth: 0 # This fetches all branches and history
-
+          persist-credentials: false # Prevents the 'extraheader' issue
+          
       - name: Process SQL Changes
         id: process_sql
         shell: bash
@@ -242,9 +243,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config --local --unset-all http.https://github.com/.extraheader || true
-          
+        run: |          
           # 1. Configure local git for the runner
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -262,6 +261,8 @@ jobs:
             echo "NOTICE: Direct push failed (Likely Branch Protection). Falling back to PR mode."
             echo "deploy_status=needs_pr" >> $GITHUB_OUTPUT
           fi
+          
+          git config --local --unset-all http.https://github.com/.extraheader || true
 
       - name: Create and Auto-Merge PR (if commit failed)
         if: steps.deploy_sql.outputs.deploy_status == 'needs_pr'
