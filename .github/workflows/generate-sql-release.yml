@@ -3,41 +3,14 @@ name: Generate SQL Release Bundle
 on:
   push:
     branches:
-      - '*_Release'  # Matches DEV_Release, SIT_Release.
       - Release
     paths:
-      - '**/DB/SP/**'
-      - '**/DB/Data/**'
-      
-  workflow_dispatch: # This enables the manual "Run" button
-    inputs:
-      fake_run:
-        description: 'Fake Run (Create artifact, NO commit/push)'
-        type: boolean
-        default: false
-      output_to_artifact:
-        description: 'Output Report to Artifact (Instead of Summary)'
-        type: boolean
-        default: false
-      commit_to:
-        # description: 'Commits to (0 - Release & main [default], 1 - Release only, 2 - main only)'
-        # type: integer
-        # default: 0
-        description: 'Which branch to commit the changes to?'
-        type: choice
-        options:
-          - 'Both'
-          - 'Release Only'
-          - 'Main Only'
-        default: 'Both'
-      file_description:
-        description: 'Suffix for the filename (Optional)'
-        type: string
-        required: false
-        
+      - 'TestFileCombineActions/DB/SP/**'
+      - 'TestFileCombineActions/DB/Data/**'
+
 jobs:
   generate-bundle:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -47,28 +20,23 @@ jobs:
       # Directories that will be checked/used
       
       # SP scripts folder to search.
-      DIR_SP: "DB/SP"
+      DIR_SP: "TestFileCombineActions/DB/SP"
       # Data scripts folder to search.
-      DIR_DATA: "DB/Data"
+      DIR_DATA: "TestFileCombineActions/DB/Data"
       # Where to output final file.
-      DIR_OUTPUT: "Output/Main"
+      DIR_OUTPUT: "db_changes_cicd/dms"
       
       # Placeholders - no need to change
       TEMP_SQL: "temp_bundle.sql"
       REPORT_FILE: "summary_report.md"
       REPO_NAME: ${{ github.event.repository.name }}
       
-      # Inputs to workflow
-      INPUT_FAKE_RUN: ${{ github.event.inputs.fake_run }}
-      INPUT_TO_ARTIFACT: ${{ github.event.inputs.output_to_artifact }}
-      INPUT_COMMIT_TO: ${{ github.event.inputs.commit_to || 'Both' }}
-      INPUT_DESCRIPTION: ${{ github.event.inputs.file_description }}
-      
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
         with:
           # Removed since we r regexing for release branches
+          ref: ${{ github.ref_name }}
           #ref: Release  # Ensure we are working on the Release branch files
           fetch-depth: 0 # This fetches all branches and history
 
@@ -93,56 +61,45 @@ jobs:
             git fetch --all --tags
           fi
           
-          LAST_RELEASE_TS=""
-
-          # Check for Output folder without triggering ls immediately
-          if [ -d "$DIR_OUTPUT" ]; then
-              echo "Output directory '$DIR_OUTPUT' exists."
-              
-              # Get the newest file by name into a variable safely
-              # 2>/dev/null hides the error if the folder is empty
-              LAST_FILE=$(ls -1 "$DIR_OUTPUT" 2>/dev/null | grep "__" | sort -r | head -n 1 || echo "")
-              
-              if [ -n "$LAST_FILE" ]; then
-                  echo "Found last release: $LAST_FILE"
-                  RAW_TS=$(echo "$LAST_FILE" | cut -d'_' -f1)
-                  
-                  # Reformat for Git: YYYY-MM-DD HH:MM:SS
-                  LAST_RELEASE_TS="${RAW_TS:0:4}-${RAW_TS:4:2}-${RAW_TS:6:2} ${RAW_TS:8:2}:${RAW_TS:10:2}:${RAW_TS:12:2}"
-                  echo "Last release timestamp detected: $LAST_RELEASE_TS"
-              else
-                  echo "Output folder '$DIR_OUTPUT' exists but no SQL bundle found."
-              fi
-          else
-              echo "Output folder '$DIR_OUTPUT' does not exist yet."
-          fi
-          
+          # Always generate the new timestamp for the NEW filename
           TIMESTAMP=$(date +"%Y%m%d%H%M%S")
-          
-          DESC_SUFFIX=""
-          if [ -n "$INPUT_DESCRIPTION" ]; then
-             DESC_SUFFIX="_$INPUT_DESCRIPTION"
-          fi
-          FINAL_FILENAME="${TIMESTAMP}__${REPO_NAME}${DESC_SUFFIX}.sql"
+          FINAL_FILENAME="${TIMESTAMP}__${REPO_NAME}.sql"
           FULL_PATH="${DIR_OUTPUT}/${FINAL_FILENAME}"
+
+          # Define patterns for recursive SQL search
+          TARGET_PATTERNS="$DIR_SP/**/*.sql $DIR_DATA/**/*.sql"
+
+          # Find the LAST bundle commit hash (instead of timestamp)
+          # LAST_BUNDLE_COMMIT=$(git log --fixed-strings --grep="Auto-generated SQL bundle" -n 1 --format="%H" || echo "")
+          LAST_BUNDLE_COMMIT=$(git log -1 --author="github-actions\[bot\]" --format="%H" -- "$DIR_OUTPUT" || echo "")
+          LAST_RELEASE_DATE=""
           
-          if [ "$INPUT_FAKE_RUN" != "true" ]; then
-            mkdir -p "$DIR_OUTPUT"
+          # Identify changed files and log info
+          if [ -n "$LAST_BUNDLE_COMMIT" ]; then
+              # We still want to know the "Last Run" date for your summary report
+              # This pulls the date of the last bundle commit
+              LAST_RELEASE_DATE=$(git log -1 --format=%ai $LAST_BUNDLE_COMMIT)
+              echo "Result: Processing changes since last bundle ($LAST_BUNDLE_COMMIT) from $LAST_RELEASE_DATE"
+                
+              # Get recursive SQL changes since that commit
+              FILES=$(git diff --name-only "$LAST_BUNDLE_COMMIT" HEAD -- $TARGET_PATTERNS | sort -u)
+                
+              # Get commit titles for the changelog
+              # COMMIT_TITLES=$(git log "$LAST_BUNDLE_COMMIT..HEAD" --no-merges --pretty=format:"%ad - %h - %s" --date=format:'%Y-%m-%d %H:%M:%S' | grep -v "Auto-generated SQL bundle" | sort -u)
+          else
+              echo "Result: No previous bundle found. Processing all history for $TARGET_PATTERNS"
+              # LAST_RELEASE_DATE="Beginning of Time"
+               
+              # Get all SQL files currently in the folders
+              FILES=$(git ls-files -- $TARGET_PATTERNS | sort -u)
+                
+              # Get all commit titles since the start
+              START_POINT=$(git rev-list --max-parents=0 HEAD)
+              # COMMIT_TITLES=$(git log "$START_POINT..HEAD" --no-merges --pretty=format:"%ad - %h - %s" --date=format:'%Y-%m-%d %H:%M:%S' | grep -v "Auto-generated SQL bundle" | sort -u)
           fi
 
-          # Identify changed files
-          if [ -z "$LAST_RELEASE_TS" ]; then
-              echo "Result: Processing all history."
-              # Use the range syntax for first run
-              START_POINT=$(git rev-list --max-parents=0 HEAD)
-              FILES=$(git log "$START_POINT..HEAD" --name-only --pretty=format: | sort -u)
-              COMMIT_TITLES=$(git log "$START_POINT..HEAD" --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
-          else
-              echo "Result: Processing since $LAST_RELEASE_TS"
-              # Use the --since flag with strict quotes for subsequent runs
-              FILES=$(git log --since="$LAST_RELEASE_TS" --name-only --pretty=format: | sort -u)
-              COMMIT_TITLES=$(git log --since="$LAST_RELEASE_TS" --no-merges --pretty=format:"* [\`%h\`](https://github.com/${{ github.repository }}/commit/%H) - %s" | grep -v "Auto-generated SQL bundle" | sort -u)
-          fi
+          # Ensure output directory exists
+          mkdir -p "$DIR_OUTPUT"
 
           # Initialize counters
           SP_COUNT=0
@@ -154,7 +111,7 @@ jobs:
               if [ -z "$FILE" ] || [ ! -f "$FILE" ]; then continue; fi
               
               # --- STORED PROCEDURES ---
-              if [[ $FILE == *"$DIR_SP/"* && $FILE == *.sql ]]; then
+              if [[ $FILE == "$DIR_SP/"* && $FILE == *.sql ]]; then
                   # Clean Windows line endings for reliable regex matching
                   CONTENT=$(cat "$FILE" | tr -d '\r' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')
                   
@@ -180,7 +137,7 @@ jobs:
                   echo "| SP | Added | $FILE |" >> $REPORT_FILE
 
               # --- DATA SCRIPTS (Data/ folder) ---
-              elif [[ $FILE == *"$DIR_DATA/"* && $FILE == *.sql ]]; then
+              elif [[ $FILE == "$DIR_DATA/"* && $FILE == *.sql ]]; then
                   # Get just the diffs since that timestamp
                   # Inside the Data loop
                   if [ -z "$LAST_RELEASE_TS" ]; then
@@ -209,13 +166,14 @@ jobs:
           done
 
           # BUILD CHANGELOG (Requested Format)
-          echo -e "\n### Changelog (since last release on $LAST_RELEASE_TS):" >> $REPORT_FILE
           
           # Format: <date> - <commit hash> - <commit msg>
-          if [ -z "$LAST_RELEASE_TS" ]; then
+          if [ -z "$LAST_RELEASE_DATE" ]; then
+              echo -e "\n### Changelog (from start of branch to now):" >> $REPORT_FILE
               CHANGELOG=$(git log "$START_POINT..HEAD" --no-merges --pretty=format:"%ad - %h - %s" --date=format:'%Y-%m-%d %H:%M:%S' | grep -v "Auto-generated SQL bundle")
           else
-              CHANGELOG=$(git log --since="$LAST_RELEASE_TS" --no-merges --pretty=format:"%ad - %h - %s" --date=format:'%Y-%m-%d %H:%M:%S' | grep -v "Auto-generated SQL bundle")
+              echo -e "\n### Changelog (from last release on $LAST_RELEASE_DATE to now):" >> $REPORT_FILE
+              CHANGELOG=$(git log --since="$LAST_RELEASE_DATE" --no-merges --pretty=format:"%ad - %h - %s" --date=format:'%Y-%m-%d %H:%M:%S' | grep -v "Auto-generated SQL bundle")
           fi
           
           if [ -n "$CHANGELOG" ]; then
@@ -234,28 +192,15 @@ jobs:
             echo "-- End of changes" >> "$TEMP_SQL"
             echo "GO" >> "$TEMP_SQL" # Safety
             
-            if [ "$INPUT_FAKE_RUN" == "true" ]; then
-               mv "$TEMP_SQL" "$FINAL_FILENAME"
-               echo "FAKE_RUN=true" >> $GITHUB_OUTPUT
-               echo -e "\n**[!] FAKE RUN: SQL file saved as artifact only.**" >> $REPORT_FILE
-            else
-               mkdir -p "$DIR_OUTPUT"
-               mv "$TEMP_SQL" "$FULL_PATH"
-               echo "FAKE_RUN=false" >> $GITHUB_OUTPUT
-               echo "Output SQL file: [${FINAL_FILENAME}](https://github.com/${{ github.repository }}/blob/Release/${FULL_PATH})" >> $GITHUB_STEP_SUMMARY
-            fi
+            mkdir -p "$DIR_OUTPUT"
+            mv "$TEMP_SQL" "$FULL_PATH"
+            echo "Output SQL file: [${FINAL_FILENAME}](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/${FULL_PATH})" >> $GITHUB_STEP_SUMMARY
           else
-            echo "FAKE_RUN=false" >> $GITHUB_OUTPUT
             echo "No changes found. Nothing to output." >> $GITHUB_STEP_SUMMARY
           fi
           
-          if [ "$INPUT_TO_ARTIFACT" == "true" ]; then
-             echo "REPORT_TO_ARTIFACT=true" >> $GITHUB_OUTPUT
-             echo "Detailed report has been moved to artifacts." >> $GITHUB_STEP_SUMMARY
-          else
-             cat "$REPORT_FILE" >> $GITHUB_STEP_SUMMARY
-             rm "$REPORT_FILE"
-          fi
+          cat "$REPORT_FILE" >> $GITHUB_STEP_SUMMARY
+          rm "$REPORT_FILE"
           
           if [ $ERRORS -gt 0 ]; then
               echo "- Validation Errors: $ERRORS" >> $GITHUB_STEP_SUMMARY
@@ -268,60 +213,80 @@ jobs:
           echo "DATA_COUNT=$DATA_COUNT" >> $GITHUB_OUTPUT
           echo "FINAL_FILENAME=$FINAL_FILENAME" >> $GITHUB_OUTPUT
       
-      - name: Upload Combined Artifacts
-        if: always() && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-artifacts
-          path: |
-            ${{ env.REPORT_FILE }}
-            ${{ steps.process_sql.outputs.FINAL_FILENAME }}
-          if-no-files-found: ignore # Prevents errors if one path doesn't exist
+      # - name: Upload Combined Artifacts
+        # if: always() && (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        # uses: actions/upload-artifact@v7
+        # with:
+          # name: release-artifacts
+          # path: |
+            # ${{ env.REPORT_FILE }}
+            # ${{ steps.process_sql.outputs.FINAL_FILENAME }}
+          # if-no-files-found: ignore # Prevents errors if one path doesn't exist
           
-      # Step for: 0 - Release only OR 1 - Release & main
       - name: Commit to Release Branch
         if: >
             success() &&
-            github.event.inputs.fake_run != 'true' &&
-            (env.INPUT_COMMIT_TO == 'Both' || env.INPUT_COMMIT_TO == 'Release Only') &&
             (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
         uses: stefanzweifel/git-auto-commit-action@v7
         with:
-          branch: Release
+          branch: ${{ github.ref_name }}
           commit_message: "Auto-generated SQL bundle (Release) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
           file_pattern: '${{ env.DIR_OUTPUT }}/*.sql'
-          
-      # Step for: 1 - Release & main OR 2 - main only
-      - name: Commit to Main Branch
-        if: >
-            success() && 
-            github.event.inputs.fake_run != 'true' &&
-            (env.INPUT_COMMIT_TO == 'Both' || env.INPUT_COMMIT_TO == 'Main Only') &&
-            (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
-        id: push_to_main
-        uses: stefanzweifel/git-auto-commit-action@v7
-        with:
-          branch: main
-          commit_message: "Auto-generated SQL bundle (Main) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
-          file_pattern: '${{ env.DIR_OUTPUT }}/${{ steps.process_sql.outputs.FINAL_FILENAME }}'
 
-      # Alternative create PR instead of committing to main branch (branch protection case)
-      - name: Create PR to Main
+      - name: Commit SQL bundle to Release Branch
         if: >
-            success() && 
-            steps.push_to_main.outcome == 'failure' && 
-            github.event.inputs.fake_run != 'true' && 
-            (env.INPUT_COMMIT_TO == 'Both' || env.INPUT_COMMIT_TO == 'Main Only') && 
-            (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
-        uses: peter-evans/create-pull-request@v8
+          success() &&
+          (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        id: deploy_sql
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 1. Configure local git for the runner
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 2. Stage the new SQL file
+          git add "${{ env.DIR_OUTPUT }}/*.sql"
+          git commit -m "Auto-generated SQL bundle (Release) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
+
+          # 3. Attempt direct push
+          echo "Attempting direct push to ${{ github.ref_name }}..."
+          if git push origin ${{ github.ref_name }}; then
+            echo "SUCCESS: Direct commit pushed to protected branch (Permissions allowed it)."
+            echo "deploy_status=committed" >> $GITHUB_OUTPUT
+          else
+            echo "NOTICE: Direct push failed (Likely Branch Protection). Falling back to PR mode."
+            echo "deploy_status=needs_pr" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and Auto-Merge PR (if commit failed)
+        if: steps.deploy_sql.outputs.deploy_status == 'needs_pr'
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          branch: sync-sql-bundle-${{ github.run_id }} # Unique branch name
-          base: main
-          title: "SQL Bundle: ${{ steps.process_sql.outputs.FINAL_FILENAME }}"
-          body: "Since main branch has branch protection, this is an automated PR containing the latest SQL release bundle generated from the Release branch."
-          commit-message: "Add auto-generated SQL bundle for main"
-          add-paths: |
-            ${{ env.DIR_OUTPUT }}/${{ steps.process_sql.outputs.FINAL_FILENAME }}
-          delete-branch: true # Deletes the temporary branch once merged
-            
+          branch: "auto-sql-bundle-${{ steps.process_sql.outputs.FINAL_FILENAME }}"
+          delete-branch: true
+          title: "SQL Release Bundle: ${{ steps.process_sql.outputs.FINAL_FILENAME }}"
+          commit-message: "Auto-generated SQL bundle (Release) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
+          base: ${{ github.ref_name }}
+          body: "Automated PR created due to branch protection on ${{ github.ref_name }}."
+
+      - name: Enable Automerge and Finalize
+        if: steps.cpr.outputs.pull-request-operation == 'created'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
+        run: |
+          echo "Enabling auto-merge for PR #$PR_NUMBER..."
+          
+          # Attempt to enable auto-merge (requires repo setting 'Allow auto-merge' to be ON)
+          if gh pr merge "$PR_NUMBER" --merge --auto; then
+            echo "SUCCESS: Auto-merge enabled for PR #$PR_NUMBER."
+          else
+            echo "::error::Warning: Failed to enable auto-merge for PR #$PR_NUMBER. Manually merge the PR."
+            echo "Failed to auto-merge PR. Merge it manually - [Pull Request #${{ steps.cpr.outputs.pull-request-number }}](${{ steps.cpr.outputs.pull-request-url }})" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
