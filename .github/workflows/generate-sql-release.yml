@@ -24,7 +24,7 @@ jobs:
       # Data scripts folder to search.
       DIR_DATA: "TestFileCombineActions/DB/Data"
       # Where to output final file.
-      DIR_OUTPUT: "db_changes_cicd/dms"
+      DIR_OUTPUT: "output/sqlfiles"
       
       # Placeholders - no need to change
       TEMP_SQL: "temp_bundle.sql"
@@ -223,15 +223,15 @@ jobs:
             # ${{ steps.process_sql.outputs.FINAL_FILENAME }}
           # if-no-files-found: ignore # Prevents errors if one path doesn't exist
           
-      - name: Commit to Release Branch
-        if: >
-            success() &&
-            (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
-        uses: stefanzweifel/git-auto-commit-action@v7
-        with:
-          branch: ${{ github.ref_name }}
-          commit_message: "Auto-generated SQL bundle (Release) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
-          file_pattern: '${{ env.DIR_OUTPUT }}/*.sql'
+      # - name: Commit to Release Branch
+        # if: >
+            # success() &&
+            # (steps.process_sql.outputs.SP_COUNT > 0 || steps.process_sql.outputs.DATA_COUNT > 0)
+        # uses: stefanzweifel/git-auto-commit-action@v7
+        # with:
+          # branch: ${{ github.ref_name }}
+          # commit_message: "Auto-generated SQL bundle (Release) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
+          # file_pattern: '${{ env.DIR_OUTPUT }}/*.sql'
 
       - name: Commit SQL bundle to Release Branch
         if: >
