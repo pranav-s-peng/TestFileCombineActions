@@ -73,7 +73,7 @@ jobs:
 
           # Find the LAST bundle commit hash (instead of timestamp)
           # LAST_BUNDLE_COMMIT=$(git log --fixed-strings --grep="Auto-generated SQL bundle" -n 1 --format="%H" || echo "")
-          LAST_BUNDLE_COMMIT=$(git log -1 --author="github-actions\[bot\]" --format="%H" -- "$DIR_OUTPUT" || echo "")
+          LAST_BUNDLE_COMMIT=$(git log -1 --author="github-actions" --format="%H" -- "$DIR_OUTPUT" || echo "")
           LAST_RELEASE_DATE=""
           
           # Identify changed files and log info
@@ -272,7 +272,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: "auto-sql-bundle-${{ steps.process_sql.outputs.FINAL_FILENAME }}"
           delete-branch: true
-          title: "SQL Release Bundle: ${{ steps.process_sql.outputs.FINAL_FILENAME }}"
+          title: "Auto-generated SQL bundle: ${{ steps.process_sql.outputs.FINAL_FILENAME }}"
           commit-message: "Auto-generated SQL bundle (Release) [SP: ${{ steps.process_sql.outputs.SP_COUNT }}, Data: ${{ steps.process_sql.outputs.DATA_COUNT }}]"
           base: ${{ github.ref_name }}
           body: "Automated PR created due to branch protection on ${{ github.ref_name }}."
