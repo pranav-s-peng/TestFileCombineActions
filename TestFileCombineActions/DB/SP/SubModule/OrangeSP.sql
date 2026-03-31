@@ -5,7 +5,7 @@ CREATE OR ALTER PROCEDURE OrangeSP
 )
 AS
 BEGIN
-	SELECT 'Testing testing 1 2 3 swish'
+	SELECT 'Testing testing 1 2 3 swish swash'
 END
 
 
